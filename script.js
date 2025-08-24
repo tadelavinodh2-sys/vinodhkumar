@@ -1,171 +1,239 @@
-const $ = s => document.querySelector(s);
-const recentEl = $('#recent');
-const unitBtn = $('#unit');
-let unit = localStorage.getItem('unit') || 'C';
-unitBtn.textContent = unit === 'C' ? '°C' : '°F';
+document.addEventListener('DOMContentLoaded', () => {
+  // DOM element references
+  const searchInput = document.getElementById('q');
+  const searchButton = document.getElementById('go');
+  const gpsButton = document.getElementById('geo');
+  const locationEl = document.getElementById('loc');
+  const updatedEl = document.getElementById('updated');
+  const metaEl = document.getElementById('meta');
+  const nowTempEl = document.getElementById('nowTemp');
+  const nowDescEl = document.getElementById('nowDesc');
+  const nowFeelsEl = document.getElementById('nowFeels');
+  const nowHumEl = document.getElementById('nowHum');
+  const nowWindEl = document.getElementById('nowWind');
+  const nowPopEl = document.getElementById('nowPop');
+  const hourlyContainer = document.getElementById('hourly');
+  const dailyContainer = document.getElementById('daily');
 
-const WMO = {
-  0: ['Clear sky', '☀️'],
-  1: ['Mainly clear', '🌤️'], 2: ['Partly cloudy', '⛅'], 3: ['Overcast', '☁️'],
-  45: ['Fog', '🌫️'], 48: ['Rime fog', '🌫️'],
-  51: ['Light drizzle', '🌦️'], 53: ['Drizzle', '🌦️'], 55: ['Dense drizzle', '🌧️'],
-  61: ['Slight rain', '🌧️'], 63: ['Rain', '🌧️'], 65: ['Heavy rain', '🌧️'],
-  71: ['Snow', '🌨️'], 75: ['Heavy snow', '❄️'],
-  80: ['Rain showers', '🌦️'], 95: ['Thunderstorm', '⛈️']
-};
+  const GEOCODING_API = 'https://geocoding-api.open-meteo.com/v1/search';
+  const FORECAST_API = 'https://api.open-meteo.com/v1/forecast';
 
-function toF(c) { return c * 9/5 + 32; }
-function fmtTemp(c) { return Math.round(unit === 'C' ? c : toF(c)) + '°' + unit; }
+  // --- EVENT LISTENERS ---
 
-function setRecent(name, lat, lon) {
-  const rec = JSON.parse(localStorage.getItem('recent')||'[]').filter(r=>r.name!==name);
-  rec.unshift({name, lat, lon});
-  localStorage.setItem('recent', JSON.stringify(rec.slice(0,6)));
-  renderRecent();
-}
-function renderRecent() {
-  recentEl.innerHTML='';
-  const rec = JSON.parse(localStorage.getItem('recent')||'[]');
-  rec.forEach(r=>{
-    const b = document.createElement('button');
-    b.className='chip'; b.textContent=r.name;
-    b.onclick=()=> loadByCoords(r.name, r.lat, r.lon);
-    recentEl.appendChild(b);
+  // Search button click
+  searchButton.addEventListener('click', () => {
+    const query = searchInput.value.trim();
+    if (query) {
+      getCoordinates(query);
+    }
   });
-}
 
-async function geocode(q) {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=1&language=en&format=json`;
-  const res = await fetch(url);
-  const data = await res.json();
-  if (!data.results?.length) throw new Error('Place not found');
-  const r = data.results[0];
-  const name = [r.name, r.admin1, r.country_code].filter(Boolean).join(', ');
-  return { name, lat: r.latitude, lon: r.longitude };
-}
-
-async function fetchForecast(lat, lon) {
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
-  url.search = new URLSearchParams({
-    latitude: lat, longitude: lon,
-    current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m',
-    hourly: 'temperature_2m,precipitation_probability,weather_code',
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
-    timezone: 'auto'
-  }).toString();
-  const res = await fetch(url);
-  return res.json();
-}
-
-function wIcon(code) { return (WMO[code]?.[1]) || '🌡️'; }
-function wText(code) { return (WMO[code]?.[0]) || '—'; }
-
-function drawSpark(times, tempsC) {
-  const c = $('#spark');
-  const ctx = c.getContext('2d');
-  const width = c.clientWidth; const height = c.clientHeight;
-  c.width = width * devicePixelRatio; c.height = height * devicePixelRatio;
-  ctx.scale(devicePixelRatio, devicePixelRatio);
-  ctx.clearRect(0,0,width,height);
-  const n = Math.min(24, tempsC.length);
-  const arr = tempsC.slice(0,n);
-  const min = Math.min(...arr), max = Math.max(...arr);
-  const pad = 6;
-  ctx.lineWidth = 2; ctx.strokeStyle = '#6ea8fe';
-  ctx.beginPath();
-  arr.forEach((t,i)=>{
-    const x = pad + (width-2*pad) * (i/(n-1));
-    const y = height - pad - (height-2*pad) * ((t-min)/Math.max(1,(max-min)));
-    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  // Search input Enter key press
+  searchInput.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') {
+      const query = searchInput.value.trim();
+      if (query) {
+        getCoordinates(query);
+      }
+    }
   });
-  ctx.stroke();
-}
 
-function render(name, f) {
-  $('#loc').textContent = name;
-  $('#meta').textContent = `${f.timezone}`;
-  $('#updated').textContent = `Updated: ${new Date(f.current.time).toLocaleString()}`;
+  // GPS button click
+  gpsButton.addEventListener('click', getUserLocation);
 
-  const cur = f.current;
-  $('#nowTemp').textContent = fmtTemp(cur.temperature_2m);
-  $('#nowFeels').textContent = fmtTemp(cur.apparent_temperature);
-  $('#nowHum').textContent = cur.relative_humidity_2m + '%';
-  $('#nowWind').textContent = `${Math.round(cur.wind_speed_10m)} km/h`;
-  $('#nowDesc').textContent = `${wIcon(cur.weather_code)} ${wText(cur.weather_code)}`;
+  // --- API AND DATA HANDLING ---
 
-  // Hourly
-  const hourly = $('#hourly');
-  hourly.innerHTML='';
-  for (let i=0;i<24;i++){
-    const d = new Date(f.hourly.time[i]);
-    const temp = f.hourly.temperature_2m[i];
-    const code = f.hourly.weather_code[i];
-    const el = document.createElement('div');
-    el.className='hour';
-    el.innerHTML = `<div class="muted">${d.getHours()}:00</div>
-                    <div class="wicon">${wIcon(code)}</div>
-                    <div>${fmtTemp(temp)}</div>
-                    <div class="muted">${f.hourly.precipitation_probability[i]}%</div>`;
-    hourly.appendChild(el);
+  /**
+   * Fetches coordinates for a given city name using the Geocoding API.
+   * @param {string} city - The name of the city to search for.
+   */
+  function getCoordinates(city) {
+    const url = ${GEOCODING_API}?name=${encodeURIComponent(city)}&count=1&language=en&format=json;
+
+    fetch(url)
+      .then(response => response.json())
+      .then(data => {
+        if (data.results && data.results.length > 0) {
+          const { latitude, longitude, name, admin1, country } = data.results[0];
+          const locationName = ${name}, ${admin1 || country};
+          getWeather(latitude, longitude, locationName);
+        } else {
+          alert('City not found. Please try another one.');
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching coordinates:', error);
+        alert('Failed to fetch location data.');
+      });
   }
-  drawSpark(f.hourly.time, f.hourly.temperature_2m);
 
-  // Daily
-  const daily = $('#daily');
-  daily.innerHTML='';
-  for (let i=0;i<7;i++){
-    const date = new Date(f.daily.time[i]);
-    const el = document.createElement('div');
-    el.className='day';
-    el.innerHTML = `<div class="muted">${date.toLocaleDateString(undefined,{weekday:'short'})}</div>
-                    <div class="wicon">${wIcon(f.daily.weather_code[i])}</div>
-                    <div>${fmtTemp(f.daily.temperature_2m_max[i])} / ${fmtTemp(f.daily.temperature_2m_min[i])}</div>
-                    <div class="muted">Rain: ${f.daily.precipitation_probability_max[i]}%</div>`;
-    daily.appendChild(el);
+  /**
+   * Gets the user's current position using the browser's Geolocation API.
+   */
+  function getUserLocation() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(position => {
+        const { latitude, longitude } = position.coords;
+        // Use coordinates to find a location name, then get weather
+        const url = ${GEOCODING_API}?latitude=${latitude}&longitude=${longitude}&count=1&language=en&format=json;
+        fetch(url)
+          .then(res => res.json())
+          .then(data => {
+             if (data.results && data.results.length > 0) {
+                const { name, admin1, country } = data.results[0];
+                const locationName = ${name}, ${admin1 || country};
+                getWeather(latitude, longitude, locationName);
+             } else {
+                getWeather(latitude, longitude, "Your Location");
+             }
+          })
+
+      }, error => {
+        console.error('Geolocation error:', error);
+        alert('Unable to retrieve your location. Please enable location services or use the search bar.');
+      });
+    } else {
+      alert('Geolocation is not supported by this browser.');
+    }
   }
-}
 
-async function loadByCoords(name, lat, lon) {
-  const data = await fetchForecast(lat, lon);
-  render(name, data);
-  setRecent(name, lat, lon);
-}
+  /**
+   * Fetches weather data from the Open-Meteo Forecast API.
+   * @param {number} lat - Latitude of the location.
+   * @param {number} lon - Longitude of the location.
+   * @param {string} name - The display name of the location.
+   */
+  function getWeather(lat, lon, name) {
+    const params = new URLSearchParams({
+      latitude: lat,
+      longitude: lon,
+      current: 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m',
+      hourly: 'temperature_2m,weather_code',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min',
+      timezone: 'auto'
+    });
 
-async function searchAndLoad() {
-  const q = $('#q').value.trim();
-  if (!q) return;
-  try {
-    const {name, lat, lon} = await geocode(q);
-    loadByCoords(name, lat, lon);
-  } catch (e) {
-    alert(e.message || 'Place not found');
+    const url = ${FORECAST_API}?${params.toString()};
+
+    fetch(url)
+      .then(response => response.json())
+      .then(data => {
+        updateUI(data, name);
+      })
+      .catch(error => {
+        console.error('Error fetching weather data:', error);
+        alert('Failed to fetch weather data.');
+      });
   }
-}
 
-$('#go').addEventListener('click', searchAndLoad);
-$('#q').addEventListener('keydown', e=>{ if(e.key==='Enter') searchAndLoad(); });
-$('#geo').addEventListener('click', ()=>{
-  if (!navigator.geolocation) return alert('Not supported');
-  navigator.geolocation.getCurrentPosition(async pos=>{
-    loadByCoords('Your location', pos.coords.latitude, pos.coords.longitude);
-  }, err=> alert(err.message));
+  // --- UI UPDATES ---
+
+  /**
+   * Updates the entire user interface with new weather data.
+   * @param {object} data - The weather data from the API.
+   * @param {string} name - The display name of the location.
+   */
+  function updateUI(data, name) {
+    updateCurrentWeather(data, name);
+    updateHourlyForecast(data);
+    updateDailyForecast(data);
+  }
+
+  /**
+   * Updates the "Current Weather" card.
+   */
+  function updateCurrentWeather(data, name) {
+    const { current, daily } = data;
+    const now = new Date();
+
+    locationEl.textContent = name;
+    metaEl.textContent = ${now.toLocaleDateString(undefined, { weekday: 'long' })}, ${now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })};
+    updatedEl.textContent = Updated now;
+
+    nowTempEl.textContent = ${Math.round(current.temperature_2m)}°;
+    nowDescEl.textContent = getWeatherDescription(current.weather_code).description;
+    nowFeelsEl.textContent = ${Math.round(current.apparent_temperature)}°;
+    nowHumEl.textContent = ${current.relative_humidity_2m}%;
+    nowWindEl.textContent = ${Math.round(current.wind_speed_10m)} km/h;
+    nowPopEl.textContent = ${current.precipitation} mm;
+  }
+
+  /**
+   * Updates the "Next 24 hours" card.
+   */
+  function updateHourlyForecast(data) {
+    hourlyContainer.innerHTML = '';
+    const { hourly } = data;
+    const now = new Date();
+    const currentHour = now.getHours();
+
+    // Display forecast for the next 24 hours starting from the current hour
+    for (let i = currentHour; i < currentHour + 24; i++) {
+      const time = new Date(hourly.time[i]);
+      const hourString = time.getHours() === new Date().getHours() ? 'Now' : time.toLocaleTimeString(undefined, { hour: 'numeric', hour12: true });
+
+      const hourDiv = document.createElement('div');
+      hourDiv.className = 'hour';
+      hourDiv.innerHTML = `
+        <div>${hourString}</div>
+        <div class="wicon">${getWeatherDescription(hourly.weather_code[i]).icon}</div>
+        <div>${Math.round(hourly.temperature_2m[i])}°</div>
+      `;
+      hourlyContainer.appendChild(hourDiv);
+    }
+  }
+
+  /**
+   * Updates the "7-day forecast" card.
+   */
+  function updateDailyForecast(data) {
+    dailyContainer.innerHTML = '';
+    const { daily } = data;
+
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(daily.time[i]);
+      const dayName = i === 0 ? 'Today' : date.toLocaleDateString(undefined, { weekday: 'short' });
+
+      const dayDiv = document.createElement('div');
+      dayDiv.className = 'day';
+      dayDiv.innerHTML = `
+        <div>${dayName}</div>
+        <div class="wicon">${getWeatherDescription(daily.weather_code[i]).icon}</div>
+        <div><strong>${Math.round(daily.temperature_2m_max[i])}°</strong> / ${Math.round(daily.temperature_2m_min[i])}°</div>
+      `;
+      dailyContainer.appendChild(dayDiv);
+    }
+  }
+
+  /**
+   * Maps WMO weather codes to descriptions and icons.
+   * @param {number} code - The WMO weather code.
+   * @returns {{description: string, icon: string}}
+   */
+  function getWeatherDescription(code) {
+    const descriptions = {
+      0: { description: 'Clear sky', icon: '☀' },
+      1: { description: 'Mainly clear', icon: '🌤' },
+      2: { description: 'Partly cloudy', icon: '🌥' },
+      3: { description: 'Overcast', icon: '☁' },
+      45: { description: 'Fog', icon: '🌫' },
+      48: { description: 'Depositing rime fog', icon: '🌫' },
+      51: { description: 'Light drizzle', icon: '💧' },
+      53: { description: 'Moderate drizzle', icon: '💧' },
+      55: { description: 'Dense drizzle', icon: '💧' },
+      61: { description: 'Slight rain', icon: '🌧' },
+      63: { description: 'Moderate rain', icon: '🌧' },
+      65: { description: 'Heavy rain', icon: '🌧' },
+      80: { description: 'Slight rain showers', icon: '🌦' },
+      81: { description: 'Moderate rain showers', icon: '🌦' },
+      82: { description: 'Violent rain showers', icon: '🌦' },
+      95: { description: 'Thunderstorm', icon: '⛈' },
+      96: { description: 'Thunderstorm with hail', icon: '⛈' },
+      99: { description: 'Thunderstorm with heavy hail', icon: '⛈' },
+    };
+    return descriptions[code] || { description: 'Unknown', icon: '🤷' };
+  }
+
+  // Initial load with a default city
+  getCoordinates('Hyderabad');
 });
-
-unitBtn.addEventListener('click', ()=>{
-  unit = unit === 'C' ? 'F' : 'C';
-  localStorage.setItem('unit', unit);
-  unitBtn.textContent = unit === 'C' ? '°C' : '°F';
-  const rec = JSON.parse(localStorage.getItem('recent')||'[]');
-  if (rec[0]) loadByCoords(rec[0].name, rec[0].lat, rec[0].lon);
-});
-
-// Init
-renderRecent();
-(async ()=>{
-  const saved = JSON.parse(localStorage.getItem('recent')||'[]');
-  if (saved[0]) return loadByCoords(saved[0].name, saved[0].lat, saved[0].lon);
-  try {
-    const {name, lat, lon} = await geocode('Hyderabad');
-    loadByCoords(name, lat, lon);
-  } catch(e){}
-})();

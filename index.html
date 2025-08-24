@@ -11,7 +11,17 @@
     <header>
       <div class="title">WeatherNow <span class="badge">Open-Meteo • No API key</span></div>
       <div class="bar">
+        <div class="search">
+          <input id="q" placeholder="Search city… (e.g., Hyderabad)" />
+          <button id="go" class="btn">Search</button>
+        </div>
+        <button id="geo" class="btn secondary">📍 Use GPS</button>
+        <button id="unit" class="btn secondary">°C</button>
+      </div>
+      <div id="recent" class="chips"></div>
+    </header>
 
+    <section class="grid">
       <div class="card current">
         <div class="current-top">
           <div>

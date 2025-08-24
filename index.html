@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WeatherNow – Forecast</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">WeatherNow <span class="badge">Open-Meteo • No API key</span></div>
+      <div class="bar">
+        <div class="search">
+          <input id="q" placeholder="Search city… (e.g., Hyderabad)" />
+          <button id="go" class="btn">Search</button>
+        </div>
+        <button id="geo" class="btn secondary">📍 Use GPS</button>
+        <button id="unit" class="btn secondary">°C</button>
+      </div>
+      <div id="recent" class="chips"></div>
+    </header>
+
+    <section class="grid">
+      <div class="card current">
+        <div class="current-top">
+          <div>
+            <div id="loc" class="loc">—</div>
+            <div id="meta" class="meta">—</div>
+          </div>
+          <div id="updated" class="meta">—</div>
+        </div>
+        <div class="current-main">
+          <div>
+            <div id="nowTemp" class="temp">—</div>
+            <div id="nowDesc" class="desc">—</div>
+          </div>
+          <div class="stats">
+            <div class="stat">Feels like <div id="nowFeels">—</div></div>
+            <div class="stat">Humidity <div id="nowHum">—</div></div>
+            <div class="stat">Wind <div id="nowWind">—</div></div>
+            <div class="stat">Rain <div id="nowPop">—</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Next 24 hours</div>
+        <div id="hourly" class="hourly"></div>
+        <canvas id="spark"></canvas>
+      </div>
+
+      <div class="card">
+        <div class="muted">7-day forecast</div>
+        <div id="daily" class="daily"></div>
+      </div>
+    </section>
+
+    <div class="footer">Data by Open-Meteo • Demo only</div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
